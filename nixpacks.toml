@@ -1,5 +1,4 @@
-[providers]
-node = "22"
+providers = ["node"]
 
 [phases.install]
 cmds = ["pnpm install --no-frozen-lockfile"]
