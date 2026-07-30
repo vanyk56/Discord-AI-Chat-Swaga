@@ -8,9 +8,11 @@ if (!apiKey) {
 }
 
 // Model designations as requested:
-export const MODEL_CHAT = "google/gemini-3.5-flash-lite:batch";
+export const MODEL_CHAT = "google/gemini-3.5-flash-lite";
 export const MODEL_UTILS = "openai/gpt-5.6-terra-pro";
 export const MODEL_IMAGE = "krea/krea-2-large";
+
+export const FALLBACK_MODEL = "google/gemini-2.5-flash";
 
 export interface OpenRouterMessage {
   role: "user" | "assistant" | "system";
@@ -22,7 +24,7 @@ export interface OpenRouterMessage {
 }
 
 /**
- * Send request to OpenRouter Chat Completions API
+ * Send request to OpenRouter Chat Completions API with automatic fallback
  */
 export async function openrouterRequest(
   messages: OpenRouterMessage[],
@@ -34,6 +36,10 @@ export async function openrouterRequest(
     responseFormat?: { type: string };
   } = {}
 ): Promise<string> {
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY environment variable is not set!");
+  }
+
   const finalMessages: OpenRouterMessage[] = [];
 
   if (options.systemInstruction) {
@@ -50,7 +56,7 @@ export async function openrouterRequest(
   if (options.temperature !== undefined) payload.temperature = options.temperature;
   if (options.responseFormat) payload.response_format = options.responseFormat;
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  let response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
@@ -60,6 +66,27 @@ export async function openrouterRequest(
     },
     body: JSON.stringify(payload),
   });
+
+  // Automatic fallback if requested model is unavailable (404/400)
+  if (!response.ok && model !== FALLBACK_MODEL) {
+    const errBody = await response.text();
+    if (response.status === 404 || errBody.includes("Batch API") || errBody.includes("not found")) {
+      console.warn(`[OpenRouter] Model ${model} unavailable for live chat (${response.status}), falling back to ${FALLBACK_MODEL}`);
+      payload.model = FALLBACK_MODEL;
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://discord.com",
+          "X-Title": "SWAGAgpt Discord Bot",
+        },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      throw new Error(`OpenRouter API error (${response.status}): ${errBody.slice(0, 300)}`);
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -74,7 +101,7 @@ export async function openrouterRequest(
 }
 
 /**
- * Primary text generation for utilities (uses openai/gpt-5.6-terra-pro by default)
+ * Primary text generation for utilities (uses openai/gpt-5.6-terra-pro with fallback)
  */
 export async function geminiText(
   prompt: string,
@@ -98,7 +125,7 @@ export async function geminiJSON<T>(prompt: string, model: string = MODEL_UTILS)
 }
 
 /**
- * Multi-turn chat generation for main chat (uses google/gemini-3.5-flash-lite:batch by default)
+ * Multi-turn chat generation for main chat
  */
 export async function openrouterChat(
   messages: OpenRouterMessage[],
@@ -115,7 +142,6 @@ async function fetchImageFromResponse(
   content: string,
   rawChoices?: any[]
 ): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  // Check choice images array if present
   if (rawChoices && Array.isArray(rawChoices)) {
     for (const choice of rawChoices) {
       if (choice.message?.images && Array.isArray(choice.message.images)) {
@@ -127,7 +153,6 @@ async function fetchImageFromResponse(
     }
   }
 
-  // Check markdown image url ![...](url) or standalone url
   const urlMatch = content.match(/https?:\/\/[^\s\)\"]+\.(?:png|jpg|jpeg|webp|gif)/i) ??
                    content.match(/https?:\/\/[^\s\)\"]+/i);
 
@@ -136,7 +161,6 @@ async function fetchImageFromResponse(
     if (fetched) return fetched;
   }
 
-  // Check base64 data URI
   const dataUriMatch = content.match(/data:(image\/[a-zA-Z+]+);base64,([A-Za-z0-9+/=]+)/);
   if (dataUriMatch) {
     return {
@@ -171,7 +195,6 @@ export async function geminiGenerateImage(
   prompt: string
 ): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
-    // 1. Try chat completions with image model
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -194,7 +217,6 @@ export async function geminiGenerateImage(
       if (parsed) return parsed;
     }
 
-    // 2. Fallback to /images/generations endpoint if chat completions didn't return image
     const imgResponse = await fetch(`${baseUrl}/images/generations`, {
       method: "POST",
       headers: {
@@ -272,11 +294,9 @@ export async function geminiEditImage(
   }
 }
 
-// Backward compatibility export shim
 export const ai = {
   models: {
     generateContent: async (args: any) => {
-      // Fallback bridge for legacy calls
       const prompt = typeof args.contents === "string"
         ? args.contents
         : JSON.stringify(args.contents);
