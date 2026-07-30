@@ -18,11 +18,11 @@
     "opusscript": "^0.1.1",
     "pdf-parse": "^2.4.5",
     "tweetnacl": "^1.0.3",
-    "@distube/ytdl-core": "^4.16.10"
+    "@distube/ytdl-core": "^4.16.10",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
-    "@types/pdf-parse": "^1.1.5",
-    "tsx": "^4.21.0"
+    "@types/pdf-parse": "^1.1.5"
   }
 }
