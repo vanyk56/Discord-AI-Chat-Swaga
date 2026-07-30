@@ -1,1 +1,1 @@
-worker: node --import tsx/esm src/index.ts
+worker: pnpm exec tsx artifacts/discord-bot/src/index.ts
