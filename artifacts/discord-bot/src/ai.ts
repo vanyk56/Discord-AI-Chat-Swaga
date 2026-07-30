@@ -8,7 +8,7 @@ if (!apiKey) {
 }
 
 // Model designations as requested:
-export const MODEL_CHAT = "google/gemini-3.5-flash-lite";
+export const MODEL_CHAT = "x-ai/grok-4.5";
 export const MODEL_UTILS = "openai/gpt-5.6-terra-pro";
 export const MODEL_IMAGE = "krea/krea-2-large";
 
