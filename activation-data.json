@@ -1,0 +1,30 @@
+{
+  "activatedGuilds": {
+    "1490025626030309426": {
+      "code": "SWAG-E3B3C7-D79FE1",
+      "activatedAt": "2026-04-04T16:32:03.703Z",
+      "activatedBy": "1045717800519467081",
+      "activatedByName": "vana"
+    },
+    "1040257774166212618": {
+      "code": "SWAG-1373B7-D169D1",
+      "activatedAt": "2026-04-04T16:34:13.609Z",
+      "activatedBy": "1045717800519467081",
+      "activatedByName": "vana"
+    },
+    "1341378130488725577": {
+      "code": "SWAG-45EBED-C3224C",
+      "activatedAt": "2026-04-04T19:50:01.303Z",
+      "activatedBy": "1045717800519467081",
+      "activatedByName": "vana"
+    }
+  },
+  "availableCodes": [
+    "SWAG-607B81-9A76A3"
+  ],
+  "usedCodes": {
+    "SWAG-E3B3C7-D79FE1": "1490025626030309426",
+    "SWAG-1373B7-D169D1": "1040257774166212618",
+    "SWAG-45EBED-C3224C": "1341378130488725577"
+  }
+}

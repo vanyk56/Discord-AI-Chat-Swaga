@@ -1,0 +1,42 @@
+[
+  {
+    "guildId": "1341378130488725577",
+    "userId": "1045717800519467081",
+    "username": "katysha19",
+    "type": "daily",
+    "amount": 200,
+    "note": "Ежедневный бонус",
+    "id": "l6y8flpiph",
+    "timestamp": "2026-04-08T18:08:32.412Z"
+  },
+  {
+    "guildId": "1341378130488725577",
+    "userId": "1045717800519467081",
+    "username": "katysha19",
+    "type": "admin_give",
+    "amount": 300,
+    "note": "Выдано администратором katysha19",
+    "id": "fnlqse29e89",
+    "timestamp": "2026-04-08T18:10:28.299Z"
+  },
+  {
+    "guildId": "1341378130488725577",
+    "userId": "1045717800519467081",
+    "username": "katysha19",
+    "type": "transfer_out",
+    "amount": 500,
+    "note": "Создание акции SWAGA",
+    "id": "0fjk46i6fweh",
+    "timestamp": "2026-04-08T18:10:57.907Z"
+  },
+  {
+    "guildId": "1341378130488725577",
+    "userId": "1045717800519467081",
+    "username": "katysha19",
+    "type": "daily",
+    "amount": 200,
+    "note": "Ежедневный бонус",
+    "id": "csqf9gdceo9",
+    "timestamp": "2026-04-18T18:05:29.012Z"
+  }
+]

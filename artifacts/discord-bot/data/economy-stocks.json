@@ -1,0 +1,21 @@
+{
+  "1341378130488725577": {
+    "SWAGA": {
+      "symbol": "SWAGA",
+      "name": "COIN",
+      "ownerId": "1045717800519467081",
+      "ownerUsername": "katysha19",
+      "price": 10.1,
+      "totalShares": 500,
+      "availableShares": 500,
+      "priceHistory": [
+        10,
+        10.05,
+        10.1
+      ],
+      "createdAt": "2026-04-08T18:10:57.907Z",
+      "lastActivityAt": "2026-05-05T18:50:27.976Z",
+      "activityCount": 20
+    }
+  }
+}
