@@ -21,7 +21,8 @@ import {
 } from "discord.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { ai, geminiText, geminiGenerateImage, geminiEditImage, openrouterChat, MODEL_CHAT, type OpenRouterMessage } from "./ai.js";
+import { ai, geminiText, geminiGenerateImage, geminiEditImage, openrouterChat, MODEL_CHAT, MODEL_SKALA, type OpenRouterMessage } from "./ai.js";
+import { getChannelMode, setChannelMode, SKALA_SYSTEM_PROMPT } from "./skala.js";
 import { commands } from "./commands/index.js";
 import { handleTrivia } from "./games/trivia.js";
 import { handleQuest } from "./games/quest.js";
@@ -224,8 +225,12 @@ async function generateTextResponse(
     messages.push({ role: "user", content: userText });
   }
 
+  const mode = getChannelMode(channelId);
+  const activeModel = mode === "skala" ? MODEL_SKALA : MODEL_CHAT;
+  const activePrompt = mode === "skala" ? SKALA_SYSTEM_PROMPT : getSystemPrompt(guildId);
+
   try {
-    const text = await openrouterChat(messages, getSystemPrompt(guildId), MODEL_CHAT);
+    const text = await openrouterChat(messages, activePrompt, activeModel);
     const finalResponse = text || "Не могу ответить прямо сейчас.";
     history.push({ role: "model", text: finalResponse });
     return finalResponse;
@@ -480,6 +485,36 @@ async function handleAsk(interaction: ChatInputCommandInteraction) {
   } catch {
     await interaction.editReply("Упс, что-то пошло не так. Попробуй ещё раз! 😅");
   }
+}
+
+// ─── SLASH COMMAND: /skala ───────────────────────────────────────────────────
+
+async function handleSkala(interaction: ChatInputCommandInteraction) {
+  const question = interaction.options.getString("вопрос", true);
+  await interaction.deferReply();
+  try {
+    const response = await openrouterChat(
+      [{ role: "user", content: `[${interaction.user.username}]: ${question}` }],
+      SKALA_SYSTEM_PROMPT,
+      MODEL_SKALA
+    );
+    const chunks = splitMessage(response || "Skala молчит...");
+    await interaction.editReply(chunks[0]);
+    for (let i = 1; i < chunks.length; i++) await interaction.channel?.send(chunks[i]);
+  } catch {
+    await interaction.editReply("🗿 Skala временно недоступен. Попробуй ещё раз!");
+  }
+}
+
+// ─── SLASH COMMAND: /mode ────────────────────────────────────────────────────
+
+async function handleMode(interaction: ChatInputCommandInteraction) {
+  const mode = interaction.options.getString("режим", true) as "standard" | "skala";
+  setChannelMode(interaction.channelId, mode);
+  const modeName = mode === "skala" ? "🗿 Skala (Dolphin Mistral 24B Venice Edition)" : "⚡ Стандартный (Qwen 3.7 Flash)";
+  await interaction.reply({
+    content: `✅ В этом канале установлен режим ответов: **${modeName}**`,
+  });
 }
 
 // ─── SLASH COMMAND: /imagine ──────────────────────────────────────────────────
@@ -926,9 +961,11 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     }
 
     if (commandName === "help") return handleHelp(interaction);
-  if (commandName === "ask") return handleAsk(interaction);
-  if (commandName === "imagine") return handleImagine(interaction);
-  if (commandName === "clear") return handleClear(interaction);
+    if (commandName === "ask") return handleAsk(interaction);
+    if (commandName === "skala") return handleSkala(interaction);
+    if (commandName === "mode") return handleMode(interaction);
+    if (commandName === "imagine") return handleImagine(interaction);
+    if (commandName === "clear") return handleClear(interaction);
   if (commandName === "stop") return handleStop(interaction);
   // Utility
   if (commandName === "summary") return handleSummary(interaction);

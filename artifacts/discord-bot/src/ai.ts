@@ -11,6 +11,7 @@ if (!apiKey) {
 export const MODEL_CHAT = "qwen/qwen3.7-flash";
 export const MODEL_UTILS = "qwen/qwen3.7-flash";
 export const MODEL_IMAGE = "krea/krea-2-large";
+export const MODEL_SKALA = "cognitivecomputations/dolphin-mistral-24b-venice-edition";
 
 export const FALLBACK_MODEL = "google/gemini-2.5-flash";
 

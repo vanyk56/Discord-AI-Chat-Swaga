@@ -25,6 +25,27 @@ export const commands = [
     .setName("clear")
     .setDescription("Очистить историю разговора в этом канале"),
 
+  new SlashCommandBuilder()
+    .setName("skala")
+    .setDescription("🗿 Задать вопрос Skala (Dolphin Mistral 24B Venice Edition)")
+    .addStringOption((opt) =>
+      opt.setName("вопрос").setDescription("Твой вопрос к Skala").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("mode")
+    .setDescription("⚙️ Переключить режим ответов бота в этом канале")
+    .addStringOption((opt) =>
+      opt
+        .setName("режим")
+        .setDescription("Выбери режим ответов для канала")
+        .setRequired(true)
+        .addChoices(
+          { name: "⚡ Стандартный (Qwen 3.7 Flash)", value: "standard" },
+          { name: "🗿 Skala (Dolphin Mistral 24B Venice Edition)", value: "skala" },
+        )
+    ),
+
   // ── ПОЛЕЗНЫЕ КОМАНДЫ ────────────────────────────────────────────────────
 
   new SlashCommandBuilder()
