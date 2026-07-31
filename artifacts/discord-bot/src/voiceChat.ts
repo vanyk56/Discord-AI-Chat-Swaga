@@ -10,8 +10,7 @@ import {
   EndBehaviorType,
 } from "@discordjs/voice";
 import { EmbedBuilder, type VoiceBasedChannel, type TextChannel } from "discord.js";
-import { spawn } from "child_process";
-import { PassThrough } from "stream";
+import { Readable } from "stream";
 import prism from "prism-media";
 import { openrouterChat, MODEL_SKALA } from "./ai.js";
 import { SKALA_SYSTEM_PROMPT } from "./skala.js";
@@ -49,7 +48,6 @@ function buildWav(pcmData: Buffer, sampleRate = 48000, channels = 2, bitsPerSamp
   header.writeUInt32LE(sampleRate, 24);
   header.writeUInt32LE(byteRate, 28);
   header.writeUInt16LE(blockAlign, 32);
-  header.writeUInt16LE(bitsPerSample, 34);
   header.write("data", 36, "ascii");
   header.writeUInt32LE(pcmData.length, 40);
   return Buffer.concat([header, pcmData]);
@@ -100,10 +98,45 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
   }
 }
 
-// ─── TTS GENERATION (FISH AUDIO + GOOGLE TTS FALLBACK) ───────────────────────
+// ─── TTS GENERATION (INSTANT GOOGLE TTS + FISH AUDIO) ────────────────────────
 
-async function generateSpeechFishAudio(text: string): Promise<Buffer | null> {
-  // 1. Try Fish Audio via OpenRouter
+async function generateSpeechAudio(text: string): Promise<Buffer | null> {
+  // Clean text for TTS (strip code blocks, custom emojis, markdown symbols)
+  const cleanText = text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/<:[a-zA-Z0-9_]+:[0-9]+>/g, "")
+    .replace(/[\*\_~`#]/g, "")
+    .trim();
+
+  if (!cleanText) return null;
+
+  // 1. Primary: Try Google TTS (instant Russian voice MP3 stream)
+  try {
+    const chunks: Buffer[] = [];
+    // Split into sentences up to 200 chars for Google TTS
+    const parts = cleanText.match(/[^.!?]+[.!?]+/g) ?? [cleanText];
+    for (const part of parts.slice(0, 3)) {
+      const encoded = encodeURIComponent(part.trim().slice(0, 200));
+      if (!encoded) continue;
+      const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ru&client=tw-ob`;
+      const res = await fetch(googleUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        },
+      });
+      if (res.ok) {
+        chunks.push(Buffer.from(await res.arrayBuffer()));
+      }
+    }
+    if (chunks.length > 0) {
+      console.log(`[VoiceChat TTS] Synthesized ${chunks.length} Google TTS chunks.`);
+      return Buffer.concat(chunks);
+    }
+  } catch (err) {
+    console.warn("[VoiceChat TTS] Google TTS error, trying Fish Audio fallback:", err);
+  }
+
+  // 2. Fallback: Try Fish Audio via OpenRouter
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -115,7 +148,7 @@ async function generateSpeechFishAudio(text: string): Promise<Buffer | null> {
       },
       body: JSON.stringify({
         model: MODEL_TTS,
-        messages: [{ role: "user", content: text }],
+        messages: [{ role: "user", content: cleanText.slice(0, 300) }],
         modalities: ["audio", "text"],
       }),
     });
@@ -125,66 +158,27 @@ async function generateSpeechFishAudio(text: string): Promise<Buffer | null> {
       const msg = data.choices?.[0]?.message;
 
       if (msg?.audio?.data) {
-        console.log("[VoiceChat TTS] Speech generated via Fish Audio Base64");
         return Buffer.from(msg.audio.data, "base64");
       }
 
       const content = msg?.content ?? "";
       const base64Match = content.match(/data:audio\/[a-zA-Z0-9]+;base64,([A-Za-z0-9+/=]+)/);
       if (base64Match) {
-        console.log("[VoiceChat TTS] Speech generated via Fish Audio Data URI");
         return Buffer.from(base64Match[1], "base64");
       }
 
       const urlMatch = content.match(/https?:\/\/[^\s\)\"]+\.(?:mp3|wav|ogg)/i) ??
                        content.match(/https?:\/\/[^\s\)\"]+/i);
       if (urlMatch) {
-        console.log("[VoiceChat TTS] Speech generated via Fish Audio URL:", urlMatch[0]);
         const audioRes = await fetch(urlMatch[0]);
         if (audioRes.ok) return Buffer.from(await audioRes.arrayBuffer());
       }
     }
   } catch (err) {
-    console.warn("[VoiceChat TTS] Fish Audio fallback:", err);
-  }
-
-  // 2. Fallback to Google TTS (instant Russian speech synthesis)
-  try {
-    console.log("[VoiceChat TTS] Using instant Google TTS fallback");
-    const encoded = encodeURIComponent(text.slice(0, 300));
-    const googleTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ru&client=tw-ob`;
-    const res = await fetch(googleTtsUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-      },
-    });
-    if (res.ok) {
-      return Buffer.from(await res.arrayBuffer());
-    }
-  } catch (err) {
-    console.error("[VoiceChat TTS] Fallback error:", err);
+    console.error("[VoiceChat TTS] Fish Audio error:", err);
   }
 
   return null;
-}
-
-function convertAudioToPcmStream(audioBuffer: Buffer): PassThrough {
-  const passThrough = new PassThrough();
-  const ffmpegProc = spawn("ffmpeg", [
-    "-i", "pipe:0",
-    "-vn",
-    "-ar", "48000",
-    "-ac", "2",
-    "-f", "s16le",
-    "pipe:1",
-  ]);
-
-  ffmpegProc.stdin.write(audioBuffer);
-  ffmpegProc.stdin.end();
-
-  ffmpegProc.stdout.pipe(passThrough);
-  ffmpegProc.on("close", () => passThrough.end());
-  return passThrough;
 }
 
 // ─── VOICE CHAT MANAGER ──────────────────────────────────────────────────────
@@ -213,6 +207,18 @@ export async function startVoiceChat(
 
   const player = createAudioPlayer();
   connection.subscribe(player);
+
+  player.on("error", (error) => {
+    console.error("[VoiceChat Player] Error:", error.message, error.resource?.metadata);
+  });
+
+  player.on(AudioPlayerStatus.Playing, () => {
+    console.log("[VoiceChat Player] Audio started playing in voice channel!");
+  });
+
+  player.on(AudioPlayerStatus.Idle, () => {
+    console.log("[VoiceChat Player] Audio playback completed.");
+  });
 
   const session: VoiceChatSession = {
     guildId,
@@ -287,16 +293,30 @@ export async function startVoiceChat(
         // Send text copy to text channel
         await textChannel.send(`🗣️ **Пользователь**: ${userText}\n🗿 **Skala**: ${skalaReply.slice(0, 1500)}`).catch(() => {});
 
-        // 3. Synthesize speech using Fish Audio / Fallback TTS
-        const audioBuffer = await generateSpeechFishAudio(skalaReply);
-        if (audioBuffer) {
-          console.log(`[VoiceChat] Playing ${audioBuffer.length} bytes of audio back to channel...`);
-          const pcmStream = convertAudioToPcmStream(audioBuffer);
-          const resource = createAudioResource(pcmStream, { inputType: StreamType.Raw });
+        // 3. Synthesize speech using TTS and play back into voice channel
+        const audioBuffer = await generateSpeechAudio(skalaReply);
+        if (audioBuffer && audioBuffer.length > 0) {
+          console.log(`[VoiceChat] Playing ${audioBuffer.length} bytes audio back to channel...`);
+          const audioStream = Readable.from(audioBuffer);
+          const resource = createAudioResource(audioStream, {
+            inputType: StreamType.Arbitrary,
+          });
+
           player.play(resource);
 
           await new Promise<void>((resolve) => {
-            player.once(AudioPlayerStatus.Idle, () => resolve());
+            const onIdle = () => {
+              player.off(AudioPlayerStatus.Idle, onIdle);
+              player.off("error", onError);
+              resolve();
+            };
+            const onError = () => {
+              player.off(AudioPlayerStatus.Idle, onIdle);
+              player.off("error", onError);
+              resolve();
+            };
+            player.once(AudioPlayerStatus.Idle, onIdle);
+            player.once("error", onError);
             setTimeout(resolve, 30_000);
           });
         } else {
@@ -319,7 +339,7 @@ export async function startVoiceChat(
           `Бот зашёл в канал <#${voiceChannel.id}>.\n\n` +
           `• **Распознавание речи (STT)**: 👂 Gemini 2.5 Flash (\`google/gemini-2.5-flash\`)\n` +
           `• **Генерация ответа ИИ**: 🗿 Skala (\`cognitivecomputations/dolphin-mistral-24b-venice-edition\`)\n` +
-          `• **Озвучка ответа (TTS)**: 🔊 Fish Audio (\`fish-audio/s2.1-pro-free:free\`)\n\n` +
+          `• **Озвучка ответа (TTS)**: 🔊 Включена озвучка голосом\n\n` +
           `Просто говорите в голосовом канале — Skala выслушает вас и ответит голосом в реальном времени!`
         )
         .setFooter({ text: "Используй /voice-chat стоп чтобы выключить" }),
