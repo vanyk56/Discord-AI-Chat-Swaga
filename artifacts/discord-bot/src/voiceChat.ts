@@ -58,7 +58,7 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[], textChannel?: TextChan
   const wav = buildWav(pcmData);
   const base64Audio = wav.toString("base64");
 
-  // Try google/gemini-2.5-flash (supports audio modality on OpenRouter)
+  // Use openai/gpt-4o-mini (reliably supports audio input on OpenRouter)
   try {
     const rawText = await openrouterRequest(
       [
@@ -67,7 +67,7 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[], textChannel?: TextChan
           content: [
             {
               type: "text",
-              text: "Transcribe this audio exactly as spoken. Reply with ONLY the transcription, no commentary, no timestamps, no formatting. If the audio contains no speech or is completely silent/unclear, reply with exactly one word: ТИШИНА",
+              text: "Transcribe this audio exactly as spoken in Russian. Reply with ONLY the transcription text. If silent, reply: ТИШИНА",
             },
             {
               type: "input_audio",
@@ -76,7 +76,7 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[], textChannel?: TextChan
           ],
         },
       ],
-      "google/gemini-2.5-flash"
+      "openai/gpt-4o-mini"
     );
 
     const text = rawText?.trim() ?? null;
