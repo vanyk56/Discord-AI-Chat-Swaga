@@ -59,6 +59,40 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
   const wav = buildWav(pcmData);
   const base64Audio = wav.toString("base64");
 
+  // Attempt 1: input_audio payload
+  try {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://discord.com",
+        "X-Title": "SWAGAgpt Discord Bot",
+      },
+      body: JSON.stringify({
+        model: MODEL_STT,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Transcribe spoken audio in Russian. Return ONLY the spoken text. If silent or no speech, reply with exactly: ТИШИНА" },
+              { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      const text = data.choices?.[0]?.message?.content?.trim();
+      if (text && !text.includes("ТИШИНА") && !text.toLowerCase().includes("silence")) {
+        return text;
+      }
+    }
+  } catch {}
+
+  // Attempt 2: image_url Data URI fallback
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -82,19 +116,18 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
       }),
     });
 
-    if (!res.ok) {
-      console.error("[VoiceChat STT] Error:", res.status, await res.text());
-      return null;
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      const text = data.choices?.[0]?.message?.content?.trim();
+      if (text && !text.includes("ТИШИНА") && !text.toLowerCase().includes("silence")) {
+        return text;
+      }
     }
-
-    const data = (await res.json()) as any;
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text || text.includes("ТИШИНА") || text.toLowerCase().includes("silence")) return null;
-    return text;
   } catch (err) {
-    console.error("[VoiceChat STT] Error during transcription:", err);
-    return null;
+    console.error("[VoiceChat STT] Fallback error:", err);
   }
+
+  return null;
 }
 
 // ─── TTS GENERATION ──────────────────────────────────────────────────────────
@@ -263,7 +296,7 @@ export async function startVoiceChat(
     const pcmBuffers: Buffer[] = [];
 
     const audioStream = receiver.subscribe(userId, {
-      end: { behavior: EndBehaviorType.AfterSilence, duration: 1500 },
+      end: { behavior: EndBehaviorType.AfterSilence, duration: 800 },
     });
 
     console.log(`[VoiceChat] 🎙️ Listening to ${username} (${userId})`);
