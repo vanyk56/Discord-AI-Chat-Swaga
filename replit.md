@@ -35,8 +35,8 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 Located in `artifacts/discord-bot/src/index.ts`.
 
 ### AI Models (OpenRouter)
-- **Основной чат / общение**: `google/gemini-3.5-flash-lite:batch`
-- **Утилиты, факты, код, игры, транскрипция**: `openai/gpt-5.6-terra-pro`
+- **Основной чат / общение**: `qwen/qwen3.7-flash`
+- **Утилиты, кодинг, факты, игры, транскрипция**: `qwen/qwen3.7-flash`
 - **Генерация и редактирование картинок**: `krea/krea-2-large`
 
 ### Environment Variables Required
