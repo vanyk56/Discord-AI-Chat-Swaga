@@ -11,13 +11,12 @@ import {
 } from "@discordjs/voice";
 import { EmbedBuilder, type VoiceBasedChannel, type TextChannel } from "discord.js";
 import { Readable } from "stream";
-import { openrouterChat, MODEL_SKALA } from "./ai.js";
+import { openrouterChat, openrouterRequest, MODEL_SKALA, MODEL_UTILS } from "./ai.js";
 import { SKALA_SYSTEM_PROMPT } from "./skala.js";
 
 const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.AI_INTEGRATIONS_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY;
 const baseUrl = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
 
-export const MODEL_STT = "google/gemini-2.5-flash";
 export const MODEL_TTS = "fish-audio/s2.1-pro-free:free";
 
 interface VoiceChatSession {
@@ -59,75 +58,33 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
   const wav = buildWav(pcmData);
   const base64Audio = wav.toString("base64");
 
-  // Attempt 1: input_audio payload
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://discord.com",
-        "X-Title": "SWAGAgpt Discord Bot",
-      },
-      body: JSON.stringify({
-        model: MODEL_STT,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Transcribe spoken audio in Russian. Return ONLY the spoken text. If silent or no speech, reply with exactly: ТИШИНА" },
-              { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
-            ],
-          },
-        ],
-      }),
-    });
+    const rawText = await openrouterRequest(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Transcribe this audio exactly as spoken. Reply with ONLY the transcription, no commentary, no timestamps, no formatting. If the audio contains no speech or is completely silent/unclear, reply with exactly one word: ТИШИНА",
+            },
+            {
+              type: "input_audio",
+              input_audio: { data: base64Audio, format: "wav" },
+            },
+          ],
+        },
+      ],
+      MODEL_UTILS
+    );
 
-    if (res.ok) {
-      const data = (await res.json()) as any;
-      const text = data.choices?.[0]?.message?.content?.trim();
-      if (text && !text.includes("ТИШИНА") && !text.toLowerCase().includes("silence")) {
-        return text;
-      }
-    }
-  } catch {}
-
-  // Attempt 2: image_url Data URI fallback
-  try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://discord.com",
-        "X-Title": "SWAGAgpt Discord Bot",
-      },
-      body: JSON.stringify({
-        model: MODEL_STT,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Transcribe spoken audio in Russian. Return ONLY the spoken text. If silent or no speech, reply with exactly: ТИШИНА" },
-              { type: "image_url", image_url: { url: `data:audio/wav;base64,${base64Audio}` } },
-            ],
-          },
-        ],
-      }),
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as any;
-      const text = data.choices?.[0]?.message?.content?.trim();
-      if (text && !text.includes("ТИШИНА") && !text.toLowerCase().includes("silence")) {
-        return text;
-      }
-    }
+    const text = rawText?.trim() ?? null;
+    if (!text || text === "ТИШИНА" || text.toLowerCase() === "silence") return null;
+    return text;
   } catch (err) {
-    console.error("[VoiceChat STT] Fallback error:", err);
+    console.error("[VoiceChat STT] Error:", (err as Error).message);
+    return null;
   }
-
-  return null;
 }
 
 // ─── TTS GENERATION ──────────────────────────────────────────────────────────
