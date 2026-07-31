@@ -97,7 +97,7 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
   }
 }
 
-// ─── TTS GENERATION (INSTANT GOOGLE TTS + FISH AUDIO) ────────────────────────
+// ─── TTS GENERATION ──────────────────────────────────────────────────────────
 
 async function generateSpeechAudio(text: string): Promise<Buffer | null> {
   const cleanText = text
@@ -190,6 +190,13 @@ export async function startVoiceChat(
     stopVoiceChat(guildId);
   }
 
+  // Destroy existing voice connection first to release adapter
+  const existing = getVoiceConnection(guildId);
+  if (existing) {
+    existing.destroy();
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
     guildId,
@@ -236,6 +243,12 @@ export async function startVoiceChat(
   receiver.speaking.on("start", async (userId) => {
     if (!session.active || session.isSpeakingAI) return;
 
+    let username = `Пользователь ${userId.slice(-4)}`;
+    try {
+      const member = await voiceChannel.guild.members.fetch(userId);
+      username = member.displayName;
+    } catch {}
+
     let OpusScript: any;
     try {
       const mod = await import("opusscript");
@@ -253,7 +266,7 @@ export async function startVoiceChat(
       end: { behavior: EndBehaviorType.AfterSilence, duration: 1500 },
     });
 
-    console.log(`[VoiceChat] 🎙️ Listening to user ${userId}`);
+    console.log(`[VoiceChat] 🎙️ Listening to ${username} (${userId})`);
 
     audioStream.on("data", (chunk: Buffer) => {
       try {
@@ -272,17 +285,17 @@ export async function startVoiceChat(
       session.isSpeakingAI = true;
 
       try {
-        console.log(`[VoiceChat] Processing ${pcmBuffers.length} decoded PCM audio frames...`);
+        console.log(`[VoiceChat] Processing ${pcmBuffers.length} decoded PCM frames from ${username}...`);
 
         // 1. Transcribe speech using google/gemini-2.5-flash
         const userText = await transcribeVoiceInput(pcmBuffers);
         if (!userText) {
-          console.log("[VoiceChat] STT: Silence or unrecognized audio.");
+          console.log(`[VoiceChat] STT: No speech detected from ${username}.`);
           session.isSpeakingAI = false;
           return;
         }
 
-        console.log(`[VoiceChat] STT Result: "${userText}"`);
+        console.log(`[VoiceChat] STT Result (${username}): "${userText}"`);
 
         // 2. Generate response text with Skala model (Dolphin Mistral 24B Venice Edition)
         const skalaReply = await openrouterChat(
@@ -300,7 +313,7 @@ export async function startVoiceChat(
         console.log(`[VoiceChat] Skala reply: "${skalaReply}"`);
 
         // Send text copy to text channel
-        await textChannel.send(`🗣️ **Пользователь**: ${userText}\n🗿 **Skala**: ${skalaReply.slice(0, 1500)}`).catch(() => {});
+        await textChannel.send(`🗣️ **${username}**: ${userText}\n🗿 **Skala**: ${skalaReply.slice(0, 1500)}`).catch(() => {});
 
         // 3. Synthesize speech using TTS and play back into voice channel
         const audioBuffer = await generateSpeechAudio(skalaReply);
@@ -348,7 +361,7 @@ export async function startVoiceChat(
           `Бот зашёл в канал <#${voiceChannel.id}>.\n\n` +
           `• **Распознавание речи (STT)**: 👂 Gemini 2.5 Flash (\`google/gemini-2.5-flash\`)\n` +
           `• **Генерация ответа ИИ**: 🗿 Skala (\`cognitivecomputations/dolphin-mistral-24b-venice-edition\`)\n` +
-          `• **Озвучка ответа (TTS)**: 🔊 Озвучка в голосовой канал\n\n` +
+          `• **Озвучка ответа (TTS)**: 🔊 Включена озвучка в голосовой канал\n\n` +
           `Просто говорите в голосовом канале — Skala выслушает вас и ответит голосом в реальном времени!`
         )
         .setFooter({ text: "Используй /voice-chat стоп чтобы выключить" }),
