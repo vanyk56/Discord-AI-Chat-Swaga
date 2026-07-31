@@ -36,6 +36,8 @@ Located in `artifacts/discord-bot/src/index.ts`.
 
 ### AI Models (OpenRouter)
 - **Основной чат / общение**: `qwen/qwen3.7-flash`
+- **Режим Skala**: `cognitivecomputations/dolphin-mistral-24b-venice-edition`
+- **Озвучка в голосовом диалоге**: `fish-audio/s2.1-pro-free:free` (Fish Audio TTS)
 - **Утилиты, кодинг, факты, игры, транскрипция**: `qwen/qwen3.7-flash`
 - **Генерация и редактирование картинок**: `krea/krea-2-large`
 

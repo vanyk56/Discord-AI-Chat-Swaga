@@ -46,6 +46,24 @@ export const commands = [
         )
     ),
 
+  new SlashCommandBuilder()
+    .setName("voice-chat")
+    .setDescription("🎙️ Живой голосовой диалог с ИИ (Skala + Fish Audio)")
+    .addSubcommand((sub) =>
+      sub
+        .setName("старт")
+        .setDescription("Запустить живой голосовой диалог с ботом")
+        .addChannelOption((opt) =>
+          opt
+            .setName("канал")
+            .setDescription("Голосовой канал (по умолчанию: твой текущий канал)")
+            .setRequired(false)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub.setName("стоп").setDescription("Остановить голосовой диалог и выйти")
+    ),
+
   // ── ПОЛЕЗНЫЕ КОМАНДЫ ────────────────────────────────────────────────────
 
   new SlashCommandBuilder()

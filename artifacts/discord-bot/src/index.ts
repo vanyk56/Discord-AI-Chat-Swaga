@@ -1088,6 +1088,57 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
     }
   }
 
+  // ── VOICE CHAT (REALTIME AI VOICE DIALOG) ──────────────────────────────────
+  if (commandName === "voice-chat") {
+    const sub = interaction.options.getSubcommand();
+    const guildId = interaction.guildId!;
+
+    if (sub === "стоп") {
+      await interaction.deferReply({ ephemeral: true });
+      const { stopVoiceChat } = await import("./voiceChat.js");
+      const stopped = stopVoiceChat(guildId);
+      await interaction.editReply(stopped ? "✅ Голосовой диалог остановлен." : "❌ Голосовой диалог не был запущен.");
+      return;
+    }
+
+    if (sub === "старт") {
+      await interaction.deferReply({ ephemeral: true });
+      const { startVoiceChat, isVoiceChatActive } = await import("./voiceChat.js");
+
+      if (isVoiceChatActive(guildId)) {
+        await interaction.editReply("❌ Голосовой диалог уже запущен. Используй `/voice-chat стоп` чтобы остановить.");
+        return;
+      }
+
+      const channelOpt = interaction.options.getChannel("канал");
+      let voiceChannel = channelOpt as import("discord.js").VoiceBasedChannel | null;
+
+      if (!voiceChannel) {
+        const member = interaction.member as import("discord.js").GuildMember | null;
+        voiceChannel = member?.voice?.channel ?? null;
+      }
+
+      if (!voiceChannel) {
+        await interaction.editReply("❌ Зайди в голосовой канал или укажи его в опции `канал`.");
+        return;
+      }
+
+      const textChannel = interaction.channel as import("discord.js").TextChannel;
+      if (!textChannel) {
+        await interaction.editReply("❌ Не удалось определить текстовый канал.");
+        return;
+      }
+
+      try {
+        await startVoiceChat(voiceChannel, textChannel);
+        await interaction.editReply(`✅ Запущен живой голосовой диалог с Skala & Fish Audio в **${voiceChannel.name}**!`);
+      } catch (err) {
+        await interaction.editReply(`❌ ${(err as Error).message}`);
+      }
+      return;
+    }
+  }
+
   // ── ЭКОНОМИКА ──────────────────────────────────────────────────────────────
   if (commandName === "баланс") return handleBalance(interaction);
   if (commandName === "топ-богачей") return handleTop(interaction);
