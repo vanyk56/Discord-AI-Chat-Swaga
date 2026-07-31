@@ -11,7 +11,6 @@ import {
 } from "@discordjs/voice";
 import { EmbedBuilder, type VoiceBasedChannel, type TextChannel } from "discord.js";
 import { Readable } from "stream";
-import prism from "prism-media";
 import { openrouterChat, MODEL_SKALA } from "./ai.js";
 import { SKALA_SYSTEM_PROMPT } from "./skala.js";
 
@@ -101,7 +100,6 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
 // ─── TTS GENERATION (INSTANT GOOGLE TTS + FISH AUDIO) ────────────────────────
 
 async function generateSpeechAudio(text: string): Promise<Buffer | null> {
-  // Clean text for TTS (strip code blocks, custom emojis, markdown symbols)
   const cleanText = text
     .replace(/```[\s\S]*?```/g, "")
     .replace(/<:[a-zA-Z0-9_]+:[0-9]+>/g, "")
@@ -110,12 +108,11 @@ async function generateSpeechAudio(text: string): Promise<Buffer | null> {
 
   if (!cleanText) return null;
 
-  // 1. Primary: Try Google TTS (instant Russian voice MP3 stream)
+  // 1. Primary: Try Google TTS (instant Russian speech synthesis)
   try {
     const chunks: Buffer[] = [];
-    // Split into sentences up to 200 chars for Google TTS
     const parts = cleanText.match(/[^.!?]+[.!?]+/g) ?? [cleanText];
-    for (const part of parts.slice(0, 3)) {
+    for (const part of parts.slice(0, 4)) {
       const encoded = encodeURIComponent(part.trim().slice(0, 200));
       if (!encoded) continue;
       const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ru&client=tw-ob`;
@@ -157,15 +154,11 @@ async function generateSpeechAudio(text: string): Promise<Buffer | null> {
       const data = (await response.json()) as any;
       const msg = data.choices?.[0]?.message;
 
-      if (msg?.audio?.data) {
-        return Buffer.from(msg.audio.data, "base64");
-      }
+      if (msg?.audio?.data) return Buffer.from(msg.audio.data, "base64");
 
       const content = msg?.content ?? "";
       const base64Match = content.match(/data:audio\/[a-zA-Z0-9]+;base64,([A-Za-z0-9+/=]+)/);
-      if (base64Match) {
-        return Buffer.from(base64Match[1], "base64");
-      }
+      if (base64Match) return Buffer.from(base64Match[1], "base64");
 
       const urlMatch = content.match(/https?:\/\/[^\s\)\"]+\.(?:mp3|wav|ogg)/i) ??
                        content.match(/https?:\/\/[^\s\)\"]+/i);
@@ -240,35 +233,51 @@ export async function startVoiceChat(
 
   const receiver = connection.receiver;
 
-  receiver.speaking.on("start", (userId) => {
+  receiver.speaking.on("start", async (userId) => {
     if (!session.active || session.isSpeakingAI) return;
 
-    console.log(`[VoiceChat] User ${userId} started speaking`);
+    let OpusScript: any;
+    try {
+      const mod = await import("opusscript");
+      OpusScript = (mod as any).default ?? mod;
+    } catch (err) {
+      console.error("[VoiceChat] Failed to load opusscript:", err);
+      return;
+    }
 
+    const FRAME_SIZE = 960; // 20ms at 48kHz
+    const decoder = new OpusScript(48000, 2, OpusScript.Application?.AUDIO ?? 2048);
     const pcmBuffers: Buffer[] = [];
-    const opusStream = receiver.subscribe(userId, {
-      end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
+
+    const audioStream = receiver.subscribe(userId, {
+      end: { behavior: EndBehaviorType.AfterSilence, duration: 1500 },
     });
 
-    const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
-    opusStream.pipe(decoder);
+    console.log(`[VoiceChat] 🎙️ Listening to user ${userId}`);
 
-    decoder.on("data", (chunk: Buffer) => {
-      if (pcmBuffers.length < 500) pcmBuffers.push(chunk);
+    audioStream.on("data", (chunk: Buffer) => {
+      try {
+        const decoded: Int16Array = decoder.decode(chunk, FRAME_SIZE);
+        pcmBuffers.push(Buffer.from(decoded.buffer));
+      } catch {
+        // Skip malformed packets
+      }
     });
 
-    decoder.on("end", async () => {
+    audioStream.on("end", async () => {
+      try { decoder.delete?.(); } catch {}
+
       if (!session.active || session.isSpeakingAI || pcmBuffers.length < 8) return;
 
       session.isSpeakingAI = true;
 
       try {
-        console.log(`[VoiceChat] Processing ${pcmBuffers.length} PCM audio buffers...`);
+        console.log(`[VoiceChat] Processing ${pcmBuffers.length} decoded PCM audio frames...`);
 
-        // 1. Transcribe speech using google/gemini-2.5-flash multimodal STT
+        // 1. Transcribe speech using google/gemini-2.5-flash
         const userText = await transcribeVoiceInput(pcmBuffers);
         if (!userText) {
-          console.log("[VoiceChat] STT: No speech detected in audio stream.");
+          console.log("[VoiceChat] STT: Silence or unrecognized audio.");
           session.isSpeakingAI = false;
           return;
         }
@@ -296,7 +305,7 @@ export async function startVoiceChat(
         // 3. Synthesize speech using TTS and play back into voice channel
         const audioBuffer = await generateSpeechAudio(skalaReply);
         if (audioBuffer && audioBuffer.length > 0) {
-          console.log(`[VoiceChat] Playing ${audioBuffer.length} bytes audio back to channel...`);
+          console.log(`[VoiceChat] Playing ${audioBuffer.length} bytes of audio back to channel...`);
           const audioStream = Readable.from(audioBuffer);
           const resource = createAudioResource(audioStream, {
             inputType: StreamType.Arbitrary,
@@ -339,7 +348,7 @@ export async function startVoiceChat(
           `Бот зашёл в канал <#${voiceChannel.id}>.\n\n` +
           `• **Распознавание речи (STT)**: 👂 Gemini 2.5 Flash (\`google/gemini-2.5-flash\`)\n` +
           `• **Генерация ответа ИИ**: 🗿 Skala (\`cognitivecomputations/dolphin-mistral-24b-venice-edition\`)\n` +
-          `• **Озвучка ответа (TTS)**: 🔊 Включена озвучка голосом\n\n` +
+          `• **Озвучка ответа (TTS)**: 🔊 Озвучка в голосовой канал\n\n` +
           `Просто говорите в голосовом канале — Skala выслушает вас и ответит голосом в реальном времени!`
         )
         .setFooter({ text: "Используй /voice-chat стоп чтобы выключить" }),
