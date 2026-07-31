@@ -12,6 +12,7 @@ import {
 import { EmbedBuilder, type VoiceBasedChannel, type TextChannel } from "discord.js";
 import { spawn } from "child_process";
 import { PassThrough } from "stream";
+import prism from "prism-media";
 import { openrouterChat, MODEL_SKALA } from "./ai.js";
 import { SKALA_SYSTEM_PROMPT } from "./skala.js";
 
@@ -31,7 +32,7 @@ interface VoiceChatSession {
 
 const sessions = new Map<string, VoiceChatSession>();
 
-// ─── WAV BUILDER & TRANSCRIPTION ─────────────────────────────────────────────
+// ─── WAV BUILDER ─────────────────────────────────────────────────────────────
 
 function buildWav(pcmData: Buffer, sampleRate = 48000, channels = 2, bitsPerSample = 16): Buffer {
   const header = Buffer.alloc(44);
@@ -73,7 +74,7 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
           {
             role: "user",
             content: [
-              { type: "text", text: "Transcribe spoken audio exactly. Return ONLY text or SILENCE." },
+              { type: "text", text: "Transcribe spoken audio exactly as heard in Russian. Return ONLY text or SILENCE." },
               { type: "input_audio", input_audio: { data: base64Audio, format: "wav" } },
             ],
           },
@@ -90,9 +91,10 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
   }
 }
 
-// ─── TTS GENERATION VIA FISH AUDIO ──────────────────────────────────────────
+// ─── TTS GENERATION (FISH AUDIO + GOOGLE TTS FALLBACK) ───────────────────────
 
 async function generateSpeechFishAudio(text: string): Promise<Buffer | null> {
+  // 1. Try Fish Audio on OpenRouter
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -109,37 +111,49 @@ async function generateSpeechFishAudio(text: string): Promise<Buffer | null> {
       }),
     });
 
-    if (!response.ok) {
-      console.error("[VoiceChat TTS] Fish Audio response not ok:", response.status, await response.text());
-      return null;
+    if (response.ok) {
+      const data = (await response.json()) as any;
+      const msg = data.choices?.[0]?.message;
+
+      if (msg?.audio?.data) {
+        return Buffer.from(msg.audio.data, "base64");
+      }
+
+      const content = msg?.content ?? "";
+      const base64Match = content.match(/data:audio\/[a-zA-Z0-9]+;base64,([A-Za-z0-9+/=]+)/);
+      if (base64Match) {
+        return Buffer.from(base64Match[1], "base64");
+      }
+
+      const urlMatch = content.match(/https?:\/\/[^\s\)\"]+\.(?:mp3|wav|ogg)/i) ??
+                       content.match(/https?:\/\/[^\s\)\"]+/i);
+      if (urlMatch) {
+        const audioRes = await fetch(urlMatch[0]);
+        if (audioRes.ok) return Buffer.from(await audioRes.arrayBuffer());
+      }
     }
-
-    const data = (await response.json()) as any;
-    const msg = data.choices?.[0]?.message;
-
-    // Check Base64 audio in response
-    if (msg?.audio?.data) {
-      return Buffer.from(msg.audio.data, "base64");
-    }
-
-    const content = msg?.content ?? "";
-    const base64Match = content.match(/data:audio\/[a-zA-Z0-9]+;base64,([A-Za-z0-9+/=]+)/);
-    if (base64Match) {
-      return Buffer.from(base64Match[1], "base64");
-    }
-
-    const urlMatch = content.match(/https?:\/\/[^\s\)\"]+\.(?:mp3|wav|ogg)/i) ??
-                     content.match(/https?:\/\/[^\s\)\"]+/i);
-    if (urlMatch) {
-      const audioRes = await fetch(urlMatch[0]);
-      if (audioRes.ok) return Buffer.from(await audioRes.arrayBuffer());
-    }
-
-    return null;
   } catch (err) {
-    console.error("[VoiceChat TTS] Error generating speech:", err);
-    return null;
+    console.warn("[VoiceChat TTS] Fish Audio unavailable, using Google TTS fallback:", err);
   }
+
+  // 2. Fallback to Google TTS (instant Russian speech synthesis)
+  try {
+    const encoded = encodeURIComponent(text.slice(0, 300));
+    const googleTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=ru&client=tw-ob`;
+    const res = await fetch(googleTtsUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      },
+    });
+    if (res.ok) {
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf;
+    }
+  } catch (err) {
+    console.error("[VoiceChat TTS] Fallback TTS error:", err);
+  }
+
+  return null;
 }
 
 function convertAudioToPcmStream(audioBuffer: Buffer): PassThrough {
@@ -216,11 +230,14 @@ export async function startVoiceChat(
       end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
     });
 
-    opusStream.on("data", (chunk: Buffer) => {
+    const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+    opusStream.pipe(decoder);
+
+    decoder.on("data", (chunk: Buffer) => {
       if (pcmBuffers.length < 500) pcmBuffers.push(chunk);
     });
 
-    opusStream.on("end", async () => {
+    decoder.on("end", async () => {
       if (!session.active || session.isSpeakingAI || pcmBuffers.length < 8) return;
 
       session.isSpeakingAI = true;
@@ -252,7 +269,7 @@ export async function startVoiceChat(
         // Send text copy to text channel
         await textChannel.send(`🗣️ **Пользователь**: ${userText}\n🗿 **Skala**: ${skalaReply.slice(0, 1500)}`).catch(() => {});
 
-        // 3. Synthesize speech using Fish Audio (fish-audio/s2.1-pro-free:free)
+        // 3. Synthesize speech using Fish Audio / Fallback TTS
         const audioBuffer = await generateSpeechFishAudio(skalaReply);
         if (audioBuffer) {
           const pcmStream = convertAudioToPcmStream(audioBuffer);
