@@ -51,13 +51,14 @@ function buildWav(pcmData: Buffer, sampleRate = 48000, channels = 2, bitsPerSamp
   return Buffer.concat([header, pcmData]);
 }
 
-async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null> {
+async function transcribeVoiceInput(pcmBuffers: Buffer[], textChannel?: TextChannel): Promise<string | null> {
   if (pcmBuffers.length < 8) return null;
   let pcmData = Buffer.concat(pcmBuffers);
   if (pcmData.length > 6 * 1024 * 1024) pcmData = pcmData.slice(-6 * 1024 * 1024);
   const wav = buildWav(pcmData);
   const base64Audio = wav.toString("base64");
 
+  // Try google/gemini-2.5-flash (supports audio modality on OpenRouter)
   try {
     const rawText = await openrouterRequest(
       [
@@ -75,14 +76,16 @@ async function transcribeVoiceInput(pcmBuffers: Buffer[]): Promise<string | null
           ],
         },
       ],
-      MODEL_UTILS
+      "google/gemini-2.5-flash"
     );
 
     const text = rawText?.trim() ?? null;
     if (!text || text === "ТИШИНА" || text.toLowerCase() === "silence") return null;
     return text;
   } catch (err) {
-    console.error("[VoiceChat STT] Error:", (err as Error).message);
+    const errMsg = (err as Error).message ?? String(err);
+    console.error("[VoiceChat STT] Error:", errMsg);
+    await textChannel?.send(`⚠️ STT ошибка: ${errMsg.slice(0, 300)}`).catch(() => {});
     return null;
   }
 }
@@ -202,7 +205,7 @@ async function subscribeUser(
       await session.textChannel.send(`🎧 Услышал **${username}** (${pcmBuffers.length} фреймов). Распознаю речь...`).catch(() => {});
 
       // 1. Transcribe speech
-      const userText = await transcribeVoiceInput(pcmBuffers);
+      const userText = await transcribeVoiceInput(pcmBuffers, session.textChannel);
       if (!userText) {
         await session.textChannel.send(`🔇 Не удалось распознать речь ${username}.`).catch(() => {});
         session.isSpeakingAI = false;
